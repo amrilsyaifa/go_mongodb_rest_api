@@ -3,7 +3,6 @@ services:
   mongodb:
     image: mongo
     container_name: mongodb_learn_go_codevoweb
-    restart: always
     env_file:
       - ../app.env
 
@@ -19,7 +18,6 @@ services:
       - "6379:6379"
     volumes:
       - redisDB:/data
-
 volumes:
   mongodb:
   redisDB:
