@@ -1,7 +1,10 @@
 package controllers
 
 import (
+	"context"
 	"fmt"
+	"html/template"
+	"log"
 	"net/http"
 	"strings"
 
@@ -10,16 +13,21 @@ import (
 	"github.com/amrilsyaifa/go_mongodb_rest_api/services"
 	"github.com/amrilsyaifa/go_mongodb_rest_api/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/thanhpk/randstr"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type AuthController struct {
 	authService	services.AuthService
 	userService services.UserService
+	ctx         context.Context
+	collection  *mongo.Collection
+	temp        *template.Template
 }
 
-func NewAuthController(authService services.AuthService, userService services.UserService) AuthController {
-	return AuthController{authService, userService}
+func NewAuthController(authService services.AuthService, userService services.UserService, ctx context.Context, collection *mongo.Collection, temp *template.Template) AuthController {
+	return AuthController{authService, userService, ctx, collection, temp}
 }
 
 func (authController *AuthController) SignUpUser(ctx *gin.Context) {
@@ -48,8 +56,42 @@ func (authController *AuthController) SignUpUser(ctx *gin.Context) {
 		return
 	}
 
+	config, err := config.LoadConfig(".")
+	if err != nil {
+		log.Fatal("Could not load config", err)
+	}
+
+	// Generate Verification Code
+	code := randstr.String(20)
+
+	verificationCode := utils.Encode(code)
+
+	// Update User in Database
+	authController.userService.UpdateUserById(newUser.ID.Hex(), "verificationCode", verificationCode)
+
+	var firstName = newUser.Name
+
+	if strings.Contains(firstName, " ") {
+		firstName = strings.Split(firstName, " ")[1]
+	}
+
+	// 👇 Send Email
+	emailData := utils.EmailData{
+		URL:       config.Origin + "/verifyemail/" + code,
+		FirstName: firstName,
+		Subject:   "Your account verification code",
+	}
+
+	err = utils.SendEmail(newUser, &emailData, authController.temp, "verificationCode.html")
+	if err != nil {
+		ctx.JSON(http.StatusBadGateway, gin.H{"status": "success", "message": "There was an error sending email"})
+		return
+	}
+
+	message := "We sent an email with a verification code to " + user.Email
+
 	// Lastly, I sent a JSON response to the user assuming there was no error. In an upcoming tutorial, we’ll send an email verification code to the user’s email.
-	ctx.JSON(http.StatusCreated, gin.H{"status": "success", "data": gin.H{"user": models.FilteredResponse(newUser)}})
+	ctx.JSON(http.StatusCreated, gin.H{"status": "success", "message": message})
 }
 
 func (authController *AuthController) SignInUser(ctx *gin.Context) {
@@ -135,4 +177,28 @@ func (authController *AuthController) LogoutUser(ctx *gin.Context) {
 	ctx.SetCookie("logged_in", "", -1, "/", "localhost", false, true)
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
+}
+
+func (ac *AuthController) VerifyEmail(ctx *gin.Context) {
+
+	code := ctx.Params.ByName("verificationCode")
+	verificationCode := utils.Encode(code)
+
+	query := bson.D{{Key: "verificationCode", Value: verificationCode}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "verified", Value: true}}}, {Key: "$unset", Value: bson.D{{Key: "verificationCode", Value: ""}}}}
+	result, err := ac.collection.UpdateOne(ac.ctx, query, update)
+	if err != nil {
+		ctx.JSON(http.StatusForbidden, gin.H{"status": "success", "message": err.Error()})
+		return
+	}
+
+	if result.MatchedCount == 0 {
+		ctx.JSON(http.StatusForbidden, gin.H{"status": "success", "message": "Could not verify email address"})
+		return
+	}
+
+	fmt.Println(result)
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Email verified successfully"})
+
 }

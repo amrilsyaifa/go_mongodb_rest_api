@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/amrilsyaifa/go_mongodb_rest_api/models"
@@ -53,4 +54,33 @@ func (usrService *UserServiceImplementation) FindUserByEmail(email string) (*mod
 	}
 
 	return user, nil
+}
+
+func (uc *UserServiceImplementation) UpdateUserById(id string, field string, value string) (*models.DBResponse, error) {
+	userId, _ := primitive.ObjectIDFromHex(id)
+	query := bson.D{{Key: "_id", Value: userId}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: value}}}}
+	result, err := uc.collection.UpdateOne(uc.ctx, query, update)
+
+	fmt.Print(result.ModifiedCount)
+	if err != nil {
+		fmt.Print(err)
+		return &models.DBResponse{}, err
+	}
+
+	return &models.DBResponse{}, nil
+}
+
+func (uc *UserServiceImplementation) UpdateOne(field string, value interface{}) (*models.DBResponse, error) {
+	query := bson.D{{Key: field, Value: value}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: value}}}}
+	result, err := uc.collection.UpdateOne(uc.ctx, query, update)
+
+	fmt.Print(result.ModifiedCount)
+	if err != nil {
+		fmt.Print(err)
+		return &models.DBResponse{}, err
+	}
+
+	return &models.DBResponse{}, nil
 }
