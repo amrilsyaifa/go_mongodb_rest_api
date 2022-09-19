@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/amrilsyaifa/go_mongodb_rest_api/config"
 	"github.com/amrilsyaifa/go_mongodb_rest_api/models"
@@ -82,7 +83,7 @@ func (authController *AuthController) SignUpUser(ctx *gin.Context) {
 		Subject:   "Your account verification code",
 	}
 
-	err = utils.SendEmail(newUser, &emailData, authController.temp, "verificationCode.html")
+	err = utils.SendEmail(newUser, &emailData,  "verificationCode.html")
 	if err != nil {
 		ctx.JSON(http.StatusBadGateway, gin.H{"status": "success", "message": "There was an error sending email"})
 		return
@@ -179,14 +180,14 @@ func (authController *AuthController) LogoutUser(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"status": "success"})
 }
 
-func (ac *AuthController) VerifyEmail(ctx *gin.Context) {
+func (authController *AuthController) VerifyEmail(ctx *gin.Context) {
 
 	code := ctx.Params.ByName("verificationCode")
 	verificationCode := utils.Encode(code)
 
 	query := bson.D{{Key: "verificationCode", Value: verificationCode}}
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: "verified", Value: true}}}, {Key: "$unset", Value: bson.D{{Key: "verificationCode", Value: ""}}}}
-	result, err := ac.collection.UpdateOne(ac.ctx, query, update)
+	result, err := authController.collection.UpdateOne(authController.ctx, query, update)
 	if err != nil {
 		ctx.JSON(http.StatusForbidden, gin.H{"status": "success", "message": err.Error()})
 		return
@@ -200,5 +201,116 @@ func (ac *AuthController) VerifyEmail(ctx *gin.Context) {
 	fmt.Println(result)
 
 	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Email verified successfully"})
+
+}
+
+func (authController *AuthController) ForgotPassword(ctx *gin.Context) {
+	var userCredential *models.ForgotPasswordInput
+
+	if err := ctx.ShouldBindJSON(&userCredential); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "message": err.Error()})
+		return
+	}
+
+	message := "You will receive a reset email if user with that email exist"
+
+	user, err := authController.userService.FindUserByEmail(userCredential.Email)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			ctx.JSON(http.StatusOK, gin.H{"status": "fail", "message": message})
+			return
+		}
+		ctx.JSON(http.StatusBadGateway, gin.H{"status": "error", "message": err.Error()})
+		return
+	}
+
+	if !user.Verified {
+		ctx.JSON(http.StatusUnauthorized, gin.H{"status": "error", "message": "Account not verified"})
+		return
+	}
+
+	config, err := config.LoadConfig(".")
+	if err != nil {
+		log.Fatal("Could not load config", err)
+	}
+
+	// Generate Verification Code
+	resetToken := randstr.String(20)
+
+	passwordResetToken := utils.Encode(resetToken)
+
+	// Update User in Database
+	query := bson.D{{Key: "email", Value: strings.ToLower(userCredential.Email)}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "passwordResetToken", Value: passwordResetToken}, {Key: "passwordResetAt", Value: time.Now().Add(time.Minute * 15)}}}}
+	result, err := authController.collection.UpdateOne(authController.ctx, query, update)
+
+	if result.MatchedCount == 0 {
+		ctx.JSON(http.StatusBadGateway, gin.H{"status": "success", "message": "There was an error sending email"})
+		return
+	}
+	if err != nil {
+		ctx.JSON(http.StatusForbidden, gin.H{"status": "success", "message": err.Error()})
+		return
+	}
+
+	var firstName = user.Name
+
+	if strings.Contains(firstName, " ") {
+		firstName = strings.Split(firstName, " ")[1]
+	}
+
+	// 👇 Send Email
+	emailData := utils.EmailData{
+		URL:       config.Origin + "/resetpassword/" + resetToken,
+		FirstName: firstName,
+		Subject:   "Your password reset token (valid for 10min)",
+	}
+
+	err = utils.SendEmail(user, &emailData, "resetPassword.html")
+	if err != nil {
+		ctx.JSON(http.StatusBadGateway, gin.H{"status": "success", "message": "There was an error sending email"})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": message})
+}
+
+func (authController *AuthController) ResetPassword(ctx *gin.Context) {
+    resetToken := ctx.Params.ByName("resetToken")
+	var userCredential *models.ResetPasswordInput
+	
+	if err := ctx.ShouldBindJSON(&userCredential); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "message": err.Error()})
+		return
+	}
+
+	if userCredential.Password != userCredential.PasswordConfirm {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "fail", "message": "Passwords do not match"})
+		return
+	}
+
+	hashedPassword, _ := utils.HashPassword(userCredential.Password)
+
+	passwordResetToken := utils.Encode(resetToken)
+
+	// Update User in Database
+	query := bson.D{{Key: "passwordResetToken", Value: passwordResetToken}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "password", Value: hashedPassword}}}, {Key: "$unset", Value: bson.D{{Key: "passwordResetToken", Value: ""}, {Key: "passwordResetAt", Value: ""}}}}
+	result, err := authController.collection.UpdateOne(authController.ctx, query, update)
+
+	if result.MatchedCount == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"status": "success", "message": "Token is invalid or has expired"})
+		return
+	}
+
+	if err != nil {
+		ctx.JSON(http.StatusForbidden, gin.H{"status": "success", "message": err.Error()})
+		return
+	}
+
+	ctx.SetCookie("access_token", "", -1, "/", "localhost", false, true)
+	ctx.SetCookie("refresh_token", "", -1, "/", "localhost", false, true)
+	ctx.SetCookie("logged_in", "", -1, "/", "localhost", false, true)
+
+	ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": "Password data updated successfully"})
 
 }

@@ -3,8 +3,11 @@ package utils
 import (
 	"bytes"
 	"crypto/tls"
+	"fmt"
 	"html/template"
 	"log"
+	"os"
+	"path/filepath"
 
 	"github.com/amrilsyaifa/go_mongodb_rest_api/config"
 	"github.com/amrilsyaifa/go_mongodb_rest_api/models"
@@ -18,7 +21,29 @@ type EmailData struct {
 	Subject		string
 }
 
-func SendEmail(user *models.DBResponse, data *EmailData, template *template.Template, templateName string) error {
+// 👇 Email template parser
+func ParseTemplateDir(dir string) (*template.Template, error) {
+	var paths []string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+
+	fmt.Println("Am parsing templates...")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return template.ParseFiles(paths...)
+}
+
+func SendEmail(user *models.DBResponse, data *EmailData,  templateName string) error {
 	config, err := config.LoadConfig(".")
 
 	if err != nil {
@@ -35,9 +60,15 @@ func SendEmail(user *models.DBResponse, data *EmailData, template *template.Temp
 
 	var body bytes.Buffer
 
-	if err := template.ExecuteTemplate(&body, templateName, &data); err != nil {
-		log.Fatal("Could not execute template", err)
+	template, err := ParseTemplateDir("templates")
+	if err != nil {
+		log.Fatal("Could not parse template", err)
 	}
+
+	template = template.Lookup(templateName)
+	template.Execute(&body, &data)
+	fmt.Println(template.Name())
+	
 
 	message := gomail.NewMessage()
 
@@ -57,3 +88,4 @@ func SendEmail(user *models.DBResponse, data *EmailData, template *template.Temp
 
 	return nil
 }
+

@@ -23,4 +23,6 @@ func(authController *AuthRouteController) AuthRoute(routeGin *gin.RouterGroup, u
 	router.GET("/refresh", authController.authController.RefreshAccessToken)
 	router.GET("/logout",middleware.DeserializeUser(userService), authController.authController.LogoutUser)
 	router.GET("/verifyemail/:verificationCode", authController.authController.VerifyEmail)
+	router.POST("/forgotpassword", authController.authController.ForgotPassword)
+	router.PATCH("/resetpassword/:resetToken", authController.authController.ResetPassword)
 }

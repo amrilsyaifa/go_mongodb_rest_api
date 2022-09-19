@@ -51,6 +51,17 @@ type DBResponse struct {
 	UpdatedAt			time.Time			`json:"updated_at" bson:"updated_at"`
 }
 
+// 👈 ForgotPasswordInput struct
+type ForgotPasswordInput struct {
+	Email string `json:"email" binding:"required"`
+}
+
+// 👈 ResetPasswordInput struct
+type ResetPasswordInput struct {
+	Password        string `json:"password" binding:"required"`
+	PasswordConfirm string `json:"passwordConfirm" binding:"required"`
+}
+
 // 👈 UserResponse struct
 type UserResponse struct {
 	ID        		primitive.ObjectID `json:"id,omitempty" bson:"_id,omitempty"`
@@ -75,3 +86,4 @@ func FilteredResponse(user *DBResponse) UserResponse {
 		UpdatedAt: 	user.UpdatedAt,
 	}
 }
+

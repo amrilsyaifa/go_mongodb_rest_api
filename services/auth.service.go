@@ -33,7 +33,7 @@ func (authService *AuthServiceImplementation) SignUpUser(user *models.SignUpInpu
 	user.Verified = true 
 	user.Role = "user"
 
-	hashedPassword, _ := utils.HashPasword(user.Password)
+	hashedPassword, _ := utils.HashPassword(user.Password)
 	user.Password = hashedPassword
 
 	// added the new user to the database with the InsertOne() function
