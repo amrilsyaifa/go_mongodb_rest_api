@@ -8,6 +8,10 @@ import (
 	"net/http"
 
 	"github.com/amrilsyaifa/go_mongodb_rest_api/config"
+	"github.com/amrilsyaifa/go_mongodb_rest_api/controllers"
+	"github.com/amrilsyaifa/go_mongodb_rest_api/routes"
+	"github.com/amrilsyaifa/go_mongodb_rest_api/services"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -17,10 +21,19 @@ import (
 
 // 👈 Create required variables that we'll re-assign later
 var (
-	server 		*gin.Engine
-	ctx			context.Context
-	mongoClient *mongo.Client
-	redisClient	*redis.Client
+	server 				*gin.Engine
+	ctx					context.Context
+	mongoClient 		*mongo.Client
+	redisClient			*redis.Client
+
+	userService 		services.UserService
+	UserController		controllers.UserController
+	UserRouteController	routes.UserRouteController
+
+	authCollection		*mongo.Collection
+	authService			services.AuthService
+	AuthController		controllers.AuthController
+	AuthRouteController	routes.AuthRouteController
 )
 
 func init() {
@@ -77,6 +90,16 @@ func init() {
 	}
 	fmt.Println("Redis client connected successfully...")
 
+	// Collections
+	authCollection = mongoClient.Database("golang_mongodb").Collection("users")
+	userService = services.NewUserServiceImplementation(authCollection, ctx)
+	authService = services.NewAuthServiceImplementation(authCollection, ctx)
+	AuthController = controllers.NewAuthController(authService, userService)
+	AuthRouteController = routes.NewAuthRouteController(AuthController)
+
+	UserController = controllers.NewUserController(userService)
+	UserRouteController = routes.NewRouteUserController(UserController)
+
 	// 👇 Create the Gin Engine instance
 	server = gin.Default()
 }
@@ -98,10 +121,18 @@ func main() {
 		panic(err)
 	}
 
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowOrigins = []string{"http://localhost:8000", "http://localhost:3000"}
+	corsConfig.AllowCredentials = true
+
+	server.Use(cors.New(corsConfig))
+
 	router := server.Group("/api")
 	router.GET("/health-checker", func(ctx *gin.Context) {
 		ctx.JSON(http.StatusOK, gin.H{"status": "success", "message": value})
 	})
 
+	AuthRouteController.AuthRoute(router, userService)
+	UserRouteController.UserRoute(router, userService)
 	log.Fatal(server.Run(":" + config.Port))
 }
